@@ -37,41 +37,65 @@ class FilterCareersMapper extends Mapper[LongWritable, Text, Text, IntWritable] 
       value: Text,
       context: Mapper[LongWritable, Text, Text, IntWritable]#Context
       ): Unit = {
-    //we actually write our logic in here.  We create output by using context.write
-    val line = value.toString() // url_host_name, url, warc_filename, warc_record_offset, warc_record_length
+    
+        
+        // We get one record from CC Index after it was filtered based on URL. Only "career" links here.
+        // We need to see if the page actually contains a job listing
+
+     // Our record schema is like this --
+     // url_host_name, url, warc_filename, warc_record_offset, warc_record_length
+   
+    val line = value.toString() 
     val fields=line.split(",")
+   
+   // extract fields
     val url_host_name =fields(0)
     val url =fields(1)
     val  warc_filename=fields(2)
     val  warc_record_offset=new StringOps(fields(3)).toLong
     val  warc_record_length=new StringOps(fields(4)).toInt
 
+    // get content from the WARC in S3.
     val content=getContent("commoncrawl", warc_filename, warc_record_offset,warc_record_length)
       // if the text contains filter words
-    if( content.contains("Job Description"))
-        context.write(new Text(url), new IntWritable(1))
+
+      // See if the content contains filter expressions.
+
+    if( content.contains("Job Description")){
     
-    //0 hi from scala hadoop =>
-    //hi 1
-    //from 1
-    //scala 1
-    //hadoop 1
+      // We write the URL to output
+        context.write(new Text(url), new IntWritable(1)) 
+    }
+    else
+    {
+   // By not writing anything in the output, we are removing this URL
+
+    }
+    
+    
   }
 
    def getContent(bucket:String, filename:String, record_offset:Long, record_length:Int):String={
+      
+    // Get the key and secret from environment
       val key=sys.env("DAS_KEY_ID")
       val secret=sys.env("DAS_SEC")
+
+      // Get Credentials for AWS
       val awsCreds = new BasicAWSCredentials(key, secret);
-      val s3 = AmazonS3ClientBuilder.standard()
+      //Get the s3 Client
+      val s3client = AmazonS3ClientBuilder.standard()
                             .withRegion(Regions.US_EAST_1)
                               .withCredentials(new AWSStaticCredentialsProvider(awsCreds))
                               .build();
 
-      val o = s3.getObject(new GetObjectRequest( bucket, filename).withRange(record_offset,record_offset+record_length))
-      val s3is = o.getObjectContent()
+      // Read the Content of WARC record
+      val s3Object = s3client.getObject(new GetObjectRequest( bucket, filename).withRange(record_offset,record_offset+record_length))
+      val s3iputStream = s3Object.getObjectContent()
       var buff=new Array[Byte](record_length+1)
-      val n=s3is.read(buff, 0, record_length)
+      val count=s3iputStream.read(buff, 0, record_length)
       val raw_text=new String(buff, StandardCharsets.US_ASCII)
+      s3iputStream.close()
       raw_text
    }
 }
